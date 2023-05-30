@@ -1,0 +1,43 @@
+WITH Data_ AS (
+  SELECT DISTINCT CUSTOMER_ID,
+    TRUNC(LAST_VALUE(TO_DATE(INVOICEDATE, 'MM/DD/YYYY HH24:MI')) OVER (ORDER BY TO_DATE(INVOICEDATE, 'MM/DD/YYYY HH24:MI') ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) - LAST_VALUE(TO_DATE(INVOICEDATE, 'MM/DD/YYYY HH24:MI')) OVER (PARTITION BY CUSTOMER_ID ORDER BY TO_DATE(INVOICEDATE, 'MM/DD/YYYY HH24:MI') RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)) AS recency,
+    COUNT(INVOICE) OVER (PARTITION BY CUSTOMER_ID ORDER BY INVOICE ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS frequency,
+    SUM(PRICE * QUANTITY) OVER (PARTITION BY CUSTOMER_ID) AS monetary
+  FROM ONLINERETAIL
+),
+rfm_score As (
+     select Data_.* ,
+        Ntile(5) over(order by recency desc) as r_score,
+        Ntile (5) over (order by frequency ) as f_score,
+        Ntile(5) over(order by monetary) as m_score
+        from Data_
+                           ),
+fm_score As (                     
+    select customer_id,recency,frequency,monetary,r_score,( f_score+m_score/2) as fm_score
+     from rfm_score)
+     
+select customer_id,recency,frequency,monetary,r_score, fm_score,
+
+CASE
+    WHEN (r_score = 5 AND fm_score IN (4, 5)) OR
+         (r_score = 4 AND fm_score = 5) THEN 'Champions'
+    WHEN (r_score = 5 AND fm_score = 2) OR
+         (r_score = 4 AND fm_score in(2,3)) OR
+         (r_score = 3 AND fm_score =3) THEN 'Potential Loyalists'
+    WHEN (r_score = 5 AND fm_score = 3) OR
+         (r_score = 4 AND fm_score = 4) OR
+         (r_score = 3 AND fm_score in(5,4)) THEN 'Loyal Customers'
+    WHEN r_score = 5 AND fm_score = 1 THEN 'Recent Customers'
+    WHEN (r_score = 4 AND fm_score = 1) OR
+              (r_score= 3 AND fm_score=1) THEN 'Promising'
+    WHEN (r_score = 3 AND fm_score = 2) OR
+         (r_score = 2 AND fm_score = 3) OR
+         (r_score = 2 AND fm_score = 2) THEN 'Customers Needing Attention'
+    WHEN (r_score = 2 AND fm_score IN (4, 5)) OR
+         (r_score = 1 AND fm_score = 3) THEN 'At Risk'
+    WHEN (r_score = 1 AND fm_score IN (4, 5)) THEN 'Cant Lose Them'
+    WHEN r_score = 1 AND fm_score = 2 THEN 'Hibernating'
+    WHEN r_score = 1 AND fm_score = 1 THEN 'Lost'
+    Else 'About to sleep'
+ END AS cust_segment
+ from fm_score 
